@@ -101,11 +101,11 @@ AtomS3R  v1.0              MyNetwork                  192.168.1.100
 │       CHANNEL 8          │  ← header
 │  ┌────────────────────┐  │
 │  │       ██████       │  │  ← VU bar (−70 to 0 dBFS)
-│  │       ██████       │    Green → Yellow → Orange → Red
-│  │ ─ ─ ─ ──────────  │  │  ← white tick = noise floor (−50 dB default)
+│  │       ██████       │  | Green → Yellow → Orange → Red
+│  │  ─ ─ ─ ──────────  │  │  ← white tick = noise floor (−50 dB default)
 │  │                    │  │
 │  └────────────────────┘  │
-│  −23.4 dB          ●    │  ← dB value | status dot
+│  −23.4 dB           ●    │  ← dB value | status dot
 └──────────────────────────┘
 ```
 
