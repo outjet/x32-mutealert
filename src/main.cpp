@@ -36,6 +36,8 @@ static constexpr float DB_MAX  =   0.0f;
 // Dark-grey bar background colour (RGB565 ≈ #202020)
 static constexpr uint16_t COL_BAR_BG = 0x1084;
 
+// Draw on change
+static float g_lastDrawnDb = -9999.0f;
 // =============================================================================
 //  Globals
 // =============================================================================
@@ -51,8 +53,16 @@ static bool     g_dataReceived  = false;    // true once first meter packet arri
 // Connection state
 static bool     g_wifiOk        = false;
 
+// Mix mute state (MIX_MUTE_PATH – e.g. main L/R bus)
+static bool     g_mixMuted      = false;   // true = bus is muted
+static bool     g_mixMuteKnown  = false;   // true once we've received a value
+
 // Display state
 static bool     g_flashOn       = false;
+
+// Change-detection for normal screen redraws
+static bool     g_lastMixMuted  = false;
+static bool     g_lastMixKnown  = false;
 
 // Timers
 static uint32_t g_lastXremoteMs   = 0;
@@ -124,6 +134,28 @@ static int buildMetersRequest(uint8_t* buf, int32_t n)
     return pos;
 }
 
+// Build:  /addr  ,   (empty args – query/get current value)
+static int buildOscGet(uint8_t* buf, const char* addr)
+{
+    int pos = 0;
+    pos = oscWriteStr(buf, pos, addr);
+    pos = oscWriteStr(buf, pos, ",");
+    return pos;
+}
+
+// Build:  /addr  ,i  value
+static int buildOscSetInt(uint8_t* buf, const char* addr, int32_t value)
+{
+    int pos = 0;
+    pos = oscWriteStr(buf, pos, addr);
+    pos = oscWriteStr(buf, pos, ",i");
+    buf[pos++] = (uint8_t)(value >> 24);
+    buf[pos++] = (uint8_t)(value >> 16);
+    buf[pos++] = (uint8_t)(value >>  8);
+    buf[pos++] = (uint8_t)(value);
+    return pos;
+}
+
 // =============================================================================
 //  OSC blob parsing
 // =============================================================================
@@ -192,6 +224,31 @@ static float parseMetersPacket(const uint8_t* buf, int bufLen, int ch1)
     return extractChannelLevel(buf + pos, (int)blobSize, ch1);
 }
 
+// Parse an OSC message with a single int32 argument at the given address.
+// Returns the integer value on success, -1 on parse failure or address mismatch.
+static int parseOscInt(const uint8_t* buf, int bufLen, const char* addr)
+{
+    const int addrLen = (int)strlen(addr);
+    if (bufLen < addrLen + 1) return -1;
+    if (memcmp(buf, addr, addrLen) != 0) return -1;
+
+    // Skip address (null-terminated, padded to 4-byte boundary)
+    int pos = addrLen + 1;
+    while (pos % 4 != 0) pos++;
+
+    // Expect type tag ",i\0\0" (4 bytes)
+    if (pos + 4 > bufLen)                     return -1;
+    if (buf[pos] != ',' || buf[pos+1] != 'i') return -1;
+    pos += 4;
+
+    // Read int32 big-endian
+    if (pos + 4 > bufLen) return -1;
+    return (int)(((int32_t)buf[pos+0] << 24) |
+                 ((int32_t)buf[pos+1] << 16) |
+                 ((int32_t)buf[pos+2] <<  8) |
+                 ((int32_t)buf[pos+3]));
+}
+
 // =============================================================================
 //  Display helpers
 // =============================================================================
@@ -224,6 +281,17 @@ static void drawNormalScreen()
     M5.Display.setTextDatum(TC_DATUM);
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
     M5.Display.drawString("CHANNEL " + String(MONITOR_CHANNEL), SCREEN_W / 2, 5);
+
+    // ── L/R (mix) mute indicator – small coloured box, top-right corner ───────
+    {
+        const uint16_t col = !g_mixMuteKnown ? (uint16_t)0x4208   // dark grey = unknown
+                           : g_mixMuted      ? TFT_RED
+                           :                   TFT_GREEN;
+        M5.Display.fillRect(SCREEN_W - 15, 1, 14, 14, col);
+        M5.Display.setTextDatum(MC_DATUM);
+        M5.Display.setTextColor(g_mixMuted ? TFT_WHITE : TFT_BLACK, col);
+        M5.Display.drawString("LR", SCREEN_W - 8, 8);
+    }
 
     // ── Bar background ────────────────────────────────────────────────────────
     M5.Display.fillRect(BAR_X, BAR_Y, BAR_W, BAR_H, COL_BAR_BG);
@@ -310,12 +378,36 @@ static void drawMutedOn()
     M5.Display.drawString("MUTED", SCREEN_W / 2, SCREEN_H / 2 - 14);
     M5.Display.setTextSize(1);
     M5.Display.drawString("Ch " + String(MONITOR_CHANNEL), SCREEN_W / 2, SCREEN_H / 2 + 18);
+
+    // ── L/R mix mute indicator (top-right, dark-red when muted so it shows on red bg)
+    {
+        const uint16_t col = !g_mixMuteKnown ? (uint16_t)0x4208   // dark grey
+                           : g_mixMuted      ? (uint16_t)0x5800   // dark red on red bg
+                           :                   TFT_GREEN;
+        M5.Display.fillRect(SCREEN_W - 15, 1, 14, 14, col);
+        M5.Display.setTextDatum(MC_DATUM);
+        M5.Display.setTextColor(TFT_WHITE, col);
+        M5.Display.drawString("LR", SCREEN_W - 8, 8);
+    }
     M5.Display.endWrite();
 }
 
 static void drawMutedOff()
 {
+    M5.Display.startWrite();
     M5.Display.fillScreen(TFT_BLACK);
+
+    // ── L/R mix mute indicator (keep visible even on the "off" flash frame)
+    {
+        const uint16_t col = !g_mixMuteKnown ? (uint16_t)0x4208
+                           : g_mixMuted      ? TFT_RED
+                           :                   TFT_GREEN;
+        M5.Display.fillRect(SCREEN_W - 15, 1, 14, 14, col);
+        M5.Display.setTextDatum(MC_DATUM);
+        M5.Display.setTextColor(g_mixMuted ? TFT_WHITE : TFT_BLACK, col);
+        M5.Display.drawString("LR", SCREEN_W - 8, 8);
+    }
+    M5.Display.endWrite();
 }
 
 // =============================================================================
@@ -355,11 +447,13 @@ static void checkWiFi()
             g_udp.begin(LOCAL_UDP_PORT);
             g_lastXremoteMs = 0;
             g_lastSubMs     = 0;
+            queryMixMute();   // refresh mix mute state after reconnect
         }
         return;
     }
     // Not connected
-    g_wifiOk = false;
+    g_wifiOk       = false;
+    g_mixMuteKnown = false;   // lose knowledge of mix state; indicator goes grey
     WiFi.reconnect();
 }
 
@@ -384,6 +478,26 @@ static void sendMetersSubscription()
     g_udp.endPacket();
 }
 
+// Query the current value of MIX_MUTE_PATH from the X32.
+static void queryMixMute()
+{
+    if (!g_wifiOk) return;
+    const int sz = buildOscGet(g_txBuf, MIX_MUTE_PATH);
+    g_udp.beginPacket(g_x32Addr, X32_PORT);
+    g_udp.write(g_txBuf, sz);
+    g_udp.endPacket();
+}
+
+// Set MIX_MUTE_PATH on the X32.  X32 convention: 1 = on/unmuted, 0 = muted.
+static void sendMixMuteSet(bool muted)
+{
+    if (!g_wifiOk) return;
+    const int sz = buildOscSetInt(g_txBuf, MIX_MUTE_PATH, muted ? 0 : 1);
+    g_udp.beginPacket(g_x32Addr, X32_PORT);
+    g_udp.write(g_txBuf, sz);
+    g_udp.endPacket();
+}
+
 // =============================================================================
 //  OSC receive
 // =============================================================================
@@ -400,17 +514,25 @@ static void handleIncomingOSC()
     const int len = g_udp.read(g_rxBuf, sizeof(g_rxBuf));
     if (len <= 0) return;
 
+    // ── Meter packet ─────────────────────────────────────────────────────────
     const float linear = parseMetersPacket(g_rxBuf, len, MONITOR_CHANNEL);
-    if (linear < 0.0f) return;   // parse error or unrelated packet
-
-    // On first valid packet, reset the silence timer so we get a clean 10 s
-    // window from the moment monitoring actually starts.
-    if (!g_dataReceived) {
-        g_lastSignalMs = millis();
-        g_dataReceived = true;
+    if (linear >= 0.0f) {
+        // On first valid packet, reset the silence timer so we get a clean
+        // window from the moment monitoring actually starts.
+        if (!g_dataReceived) {
+            g_lastSignalMs = millis();
+            g_dataReceived = true;
+        }
+        g_levelDb = linearToDb(linear);
+        return;
     }
 
-    g_levelDb = linearToDb(linear);
+    // ── Mix mute state (e.g. main L/R) ───────────────────────────────────────
+    const int mixOn = parseOscInt(g_rxBuf, len, MIX_MUTE_PATH);
+    if (mixOn >= 0) {
+        g_mixMuted     = (mixOn == 0);   // X32: 1=on(unmuted), 0=off(muted)
+        g_mixMuteKnown = true;
+    }
 }
 
 // =============================================================================
@@ -434,9 +556,10 @@ void setup()
 
     displayStatus("Registering X32...", X32_IP);
 
-    // Initial /xremote registration + meter subscription
+    // Initial /xremote registration + meter subscription + mix mute query
     sendXremote();
     sendMetersSubscription();
+    queryMixMute();
 
     const uint32_t now = millis();
     g_lastXremoteMs = now;
@@ -451,6 +574,12 @@ void loop()
 {
     M5.update();
     const uint32_t now = millis();
+
+    // ── Button: toggle L/R (mix) mute ────────────────────────────────────────
+    if (M5.BtnA.wasPressed() && g_mixMuteKnown && g_wifiOk) {
+        g_mixMuted = !g_mixMuted;
+        sendMixMuteSet(g_mixMuted);
+    }
 
     // ── Wi-Fi watchdog (every 5 s) ────────────────────────────────────────────
     if (now - g_lastWifiCheckMs >= 5000UL) {
@@ -477,19 +606,14 @@ void loop()
     // Only start counting once we have real data from the X32.
     if (g_dataReceived) {
         if (g_levelDb > NOISE_FLOOR_DB) {
-            // Signal present – reset silence timer and clear any muted state.
             g_lastSignalMs = now;
-            if (g_muted) {
-                g_muted = false;
-                drawNormalScreen();          // immediate clear of muted display
-                g_lastDisplayMs = now;
-            }
+            g_muted = false;
         } else if (!g_muted && (now - g_lastSignalMs) >= MUTE_TIMEOUT_MS) {
             g_muted = true;
         }
     }
 
-    // ── Display refresh ───────────────────────────────────────────────────────
+    // ── Display refresh ─────────────────────────────────────────────
     if (g_muted) {
         if (now - g_lastFlashMs >= FLASH_INTERVAL_MS) {
             g_flashOn     = !g_flashOn;
@@ -498,9 +622,13 @@ void loop()
             else           drawMutedOff();
         }
     } else {
-        if (now - g_lastDisplayMs >= 200UL) {   // ~5 Hz refresh
-            g_lastDisplayMs = now;
+        if (g_dataReceived && (fabs(g_levelDb - g_lastDrawnDb) > 0.5f ||
+                               g_mixMuted    != g_lastMixMuted ||
+                               g_mixMuteKnown != g_lastMixKnown)) {
             drawNormalScreen();
+            g_lastDrawnDb  = g_levelDb;
+            g_lastMixMuted = g_mixMuted;
+            g_lastMixKnown = g_mixMuteKnown;
         }
     }
 
@@ -508,9 +636,11 @@ void loop()
 #if DEBUG_SERIAL
     if (now - g_lastDebugMs >= 500UL) {
         g_lastDebugMs = now;
-        Serial.printf("[X32] Ch%d  %+.1f dB  muted=%d  wifi=%d  data=%d\n",
+        Serial.printf("[X32] Ch%d  %+.1f dB  chMuted=%d  lrMuted=%d(%s)  wifi=%d  data=%d\n",
                       MONITOR_CHANNEL, g_levelDb,
-                      (int)g_muted, (int)g_wifiOk, (int)g_dataReceived);
+                      (int)g_muted, (int)g_mixMuted,
+                      g_mixMuteKnown ? "known" : "?",
+                      (int)g_wifiOk, (int)g_dataReceived);
     }
 #endif
 

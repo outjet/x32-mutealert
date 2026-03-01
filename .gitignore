@@ -30,3 +30,45 @@
 *.exe
 *.out
 *.app
+
+# PlatformIO build output
+/.pio/
+
+# PlatformIO IDE
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Compiled source
+*.elf
+*.bin
+*.hex
+*.pyc
+*.pyo
+*.pyd
+
+# Logs
+*.log
+
+# Backup files
+*~
+*.bak
+*.swp
+
+# Arduino build output
+/build/
+
+# Other IDEs
+.idea/
+
+# Misc
+*.tmp
+*.temp
+
+# Ignore firmware upload files
+firmware.bin
+firmware.hex
+.DS_Store
+.DS_Store

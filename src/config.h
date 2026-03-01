@@ -6,8 +6,8 @@
 // =============================================================================
 
 // ── Wi-Fi ─────────────────────────────────────────────────────────────────────
-#define WIFI_SSID           "YourNetworkSSID"
-#define WIFI_PASSWORD       "YourNetworkPassword"
+#define WIFI_SSID           "Bardwell"
+#define WIFI_PASSWORD       "farmhand"
 
 // ── Behringer X32 ─────────────────────────────────────────────────────────────
 // IP address of the X32 on your LAN (set a static lease on your router).
@@ -41,6 +41,17 @@
 // The X32 drops a client registration (/xremote) after 10 s of inactivity.
 // Renew well within that window.
 #define XREMOTE_RENEW_MS    8000UL
+
+// ── Mix/Bus mute monitoring & button control ──────────────────────────────────
+// OSC address for the mix to monitor for mute state.
+// The physical button on the device toggles this mix mute.
+//
+//   Main L/R stereo bus : "/main/st/mix/on"
+//   Bus 1 (MIX 1)       : "/bus/01/mix/on"
+//   Channel 8 fader mute: "/ch/08/mix/on"
+//
+// X32 convention: value 1 = on (unmuted), 0 = muted.
+#define MIX_MUTE_PATH       "/main/st/mix/on"
 
 // ── Display ───────────────────────────────────────────────────────────────────
 // Muted-alert flash period in milliseconds (on + off each = this value).
