@@ -6,12 +6,12 @@
 // =============================================================================
 
 // ── Wi-Fi ─────────────────────────────────────────────────────────────────────
-#define WIFI_SSID           "Bardwell"
-#define WIFI_PASSWORD       "farmhand"
+#define WIFI_SSID           "SJB Production"
+#define WIFI_PASSWORD       "crestron!!"
 
 // ── Behringer X32 ─────────────────────────────────────────────────────────────
 // IP address of the X32 on your LAN (set a static lease on your router).
-#define X32_IP              "192.168.1.100"
+#define X32_IP              "192.168.0.2"
 // OSC UDP port – 10023 is the X32 default. Do not change unless you have
 // a specific reason to.
 #define X32_PORT            10023
@@ -20,7 +20,7 @@
 
 // ── Channel to monitor ────────────────────────────────────────────────────────
 // Input channel 1–32 (pre-fader meter, /meters/1 blob index 0-based).
-#define MONITOR_CHANNEL     8
+#define MONITOR_CHANNEL     11
 
 // ── Signal detection ──────────────────────────────────────────────────────────
 // Level below which we consider the channel "silent" (dBFS).
